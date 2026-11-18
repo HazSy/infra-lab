@@ -1,0 +1,45 @@
+groups:
+  - name: billing-api
+    rules:
+      - alert: ApiCaida
+        expr: up{job="billing-api"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "La API de facturación no responde"
+          description: "Prometheus no puede hacer scrape de {{ $labels.instance }} desde hace 2 minutos."
+
+      - alert: TasaDeErrores5xx
+        expr: |
+          sum(rate(http_server_requests_seconds_count{job="billing-api", status=~"5.."}[5m]))
+          /
+          clamp_min(sum(rate(http_server_requests_seconds_count{job="billing-api"}[5m])), 1)
+          > 0.05
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Más del 5 % de peticiones con error 5xx"
+          description: "Revisa los logs del contenedor api: make logs S=api"
+
+      - alert: LatenciaAltaP95
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum(rate(http_server_requests_seconds_bucket{job="billing-api"}[5m])) by (le)
+          ) > 0.8
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "El p95 supera 800 ms"
+          description: "La API tarda demasiado: revisa base de datos y consultas N+1."
+
+      - alert: HealthcheckEnRojo
+        expr: up{job="billing-api"} == 1 and on() (time() - process_start_time_seconds{job="billing-api"} < 120)
+        for: 1m
+        labels:
+          severity: info
+        annotations:
+          summary: "La API acaba de arrancar"

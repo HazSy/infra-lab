@@ -1,0 +1,60 @@
+name: Infra
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  validate:
+    name: Validar compose, Prometheus y scripts
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Crear .env de ejemplo
+        run: cp .env.example .env
+
+      - name: Validar docker compose
+        run: docker compose --env-file .env config --quiet && echo "compose válido"
+
+      - name: Validar configuración de Prometheus
+        run: |
+          docker run --rm -v "$PWD/prometheus:/etc/prometheus:ro" \
+            --entrypoint promtool prom/prometheus:v3.1.0 \
+            check config /etc/prometheus/prometheus.yml
+
+      - name: Comprobar reglas de alerta
+        run: |
+          docker run --rm -v "$PWD/prometheus:/etc/prometheus:ro" \
+            --entrypoint promtool prom/prometheus:v3.1.0 \
+            check rules /etc/prometheus/alerts.yml
+
+      - name: Validar JSON del dashboard
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq jq
+          jq empty grafana/dashboards/billing-api.json
+
+      - name: ShellCheck
+        run: |
+          sudo apt-get install -y -qq shellcheck
+          shellcheck scripts/*.sh
+
+      - name: Levantar el stack y comprobar salud
+        run: |
+          mkdir -p ../billing-api || true
+          if [ ! -f ../billing-api/Dockerfile ]; then
+            echo "Sin repositorio hermano de la API: se omite el arranque completo."
+            exit 0
+          fi
+          docker compose up -d
+          for i in $(seq 1 30); do
+            if curl -fsS http://localhost:8080/api/actuator/health > /dev/null; then
+              echo "API sana"; exit 0
+            fi
+            sleep 5
+          done
+          docker compose logs --tail=100
+          exit 1

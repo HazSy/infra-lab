@@ -1,0 +1,52 @@
+# Proxy inverso: un único punto de entrada.
+# - /api/*   -> API de facturación (Spring Boot)
+# - /grafana -> Grafana (subruta)
+# - /        -> página de estado del stack
+
+:80 {
+	encode zstd gzip
+
+	header {
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+
+	log {
+		output stdout
+		format console
+	}
+
+	handle /api/* {
+		uri strip_prefix /api
+		reverse_proxy api:8080 {
+			health_uri /actuator/health
+			health_interval 15s
+		}
+	}
+
+	handle /grafana/* {
+		uri strip_prefix /grafana
+		reverse_proxy grafana:3000
+	}
+
+	handle {
+		header Content-Type "text/html; charset=utf-8"
+		respond <<HTML
+			<!doctype html>
+			<html lang="es">
+			<head><meta charset="utf-8"><title>infra-lab</title></head>
+			<body style="font-family:system-ui;max-width:40rem;margin:4rem auto;line-height:1.6">
+				<h1>infra-lab</h1>
+				<p>Stack local en marcha.</p>
+				<ul>
+					<li><a href="/api/docs">Documentación de la API</a></li>
+					<li><a href="/grafana/">Grafana</a></li>
+					<li><a href="/api/actuator/health">Health check</a></li>
+				</ul>
+			</body>
+			</html>
+			HTML
+	}
+}
